@@ -76,7 +76,7 @@ This repository is a fork of the public XGBoost project, specifically focused on
 -   **Testing:** Comprehensive unit and integration tests must be provided for both interpolation methods, ensuring correctness at the inference level first.
 -   **Documentation:** Clear documentation of the new parameters and their effects on model behavior.
 
-Phase 2 Implementation Plan:
+## Phase 2 Implementation Plan:
 
 1. Configuration & Parameters
   The new parameters must be added to the GBTreeModelParam struct in src/gbm/gbtree_model.h. This will ensure they are
