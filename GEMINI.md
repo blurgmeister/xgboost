@@ -75,3 +75,83 @@ This repository is a fork of the public XGBoost project, specifically focused on
 -   **Configuration Handling:** Integrate interpolation parameters into the existing XGBoost parameter system (e.g., using `DMLC_DECLARE_PARAMETER` and JSON serialization).
 -   **Testing:** Comprehensive unit and integration tests must be provided for both interpolation methods, ensuring correctness at the inference level first.
 -   **Documentation:** Clear documentation of the new parameters and their effects on model behavior.
+
+Phase 2 Implementation Plan:
+
+1. Configuration & Parameters
+  The new parameters must be added to the GBTreeModelParam struct in src/gbm/gbtree_model.h. This will ensure they are
+  part of the model's configuration and are correctly serialized during model save/load.
+
+
+   * File: src/gbm/gbtree_model.h
+   * Changes:
+       * Define an enum class InterpolationMethod { kLinear, kSigmoid }.
+       * Add fields to GBTreeModelParam:
+           * interpolation_features: Using common::ParamArray<float> to store feature indices.
+           * interpolation_spans: Using common::ParamArray<float> to store the span for each feature.
+           * interpolation_method: Of type InterpolationMethod.
+           * interpolation_min_span: Float with a default of 0.0001f.
+       * Register these fields in DMLC_DECLARE_PARAMETER(GBTreeModelParam).
+
+
+  2. Prediction View Integration
+  To make these parameters available during the prediction process (especially for GPU), they need to be passed through
+  GBTreeModelView.
+
+
+   * File: src/predictor/gbtree_view.h
+   * Changes:
+       * Update the GBTreeModelView class to store interpolation settings.
+       * To optimize lookup during prediction, the constructor can pre-process interpolation_features and
+         interpolation_spans into a std::vector<float> (or a device-compatible array for GPU) of size num_features, where
+         a non-zero value indicates the span for that feature.
+
+  3. Core Interpolation Logic
+  The mathematical logic will be implemented as a shared function in the prediction header.
+
+
+   * File: src/predictor/predict_fn.h
+   * Changes:
+       * Add a function Interpolate(float fvalue, float split, float left_val, float right_val, float span, float
+         min_span, InterpolationMethod method).
+       * Implement the Linear and Sigmoid formulas provided in GEMINI.md.
+
+
+  4. CPU Predictor Implementation
+  The CPU predictor needs to intercept the tree traversal to apply interpolation.
+
+
+   * File: src/predictor/cpu_predictor.cc
+   * Changes:
+       * Modify scalar::PredValueByOneTree (and its multi-target counterpart).
+       * Instead of calling GetLeafIndex which only returns the final leaf, the traversal loop should check if the
+         current node's children are both terminal leaves.
+       * If they are, and if the split feature is configured for interpolation, call the Interpolate function.
+
+
+  5. GPU Predictor Implementation
+  Similarly, the GPU kernel needs to be updated.
+
+
+   * File: src/predictor/gpu_predictor.cu
+   * Changes:
+       * Update the GetLeafIndex (or create a GetLeafValue) device function.
+       * Ensure the interpolation parameters are available in the device memory (passed via the GBTreeModelView or kernel
+         arguments).
+
+
+  6. Python API Exposure
+  Since the parameters are registered via DMLC_DECLARE_PARAMETER, they will automatically be accessible via the Booster's
+  set_param and when passing a params dictionary in Python. However, we should ensure the Python wrapper correctly
+  handles passing lists/arrays as strings if needed (though ParamArray usually handles this).
+
+
+  7. Summary of Implementation Points
+
+   Component : File Path : Action 
+   * Model Params : src/gbm/gbtree_model.h : Add interpolation fields to GBTreeModelParam. 
+   * Shared Logic : src/predictor/predict_fn.h : Add Interpolate math function.                
+   * Predictor View : src/predictor/gbtree_view.h : Pass params to CPU/GPU predictors.            
+   * CPU Engine : src/predictor/cpu_predictor.cc : Modify traversal loop to apply interpolation. 
+   * GPU Engine : src/predictor/gpu_predictor.cu : Update CUDA kernel for interpolation.         
+  
